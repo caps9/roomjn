@@ -7,7 +7,7 @@ A 3D planner for one apartment. The whole app is the single file `index.html`.
 
 | File | What it is |
 |---|---|
-| `index.html` | The app (build 15). Works on its own when opened in a browser. |
+| `index.html` | The app (build 17). Works on its own when opened in a browser. |
 | `streamlit_app.py` | Streamlit wrapper. Entry point for Streamlit. |
 | `requirements.txt` | Tells Streamlit which package to install. |
 | `.streamlit/config.toml` | Hides the Streamlit toolbar. Optional. |

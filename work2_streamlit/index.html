@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JN Apartment Builder</title>
+<meta name="build" content="17">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -184,31 +185,13 @@ body.walk .hint { display: block; }
 <div id="labels"></div>
 <div id="photo" hidden></div>
 
-<div class="panel" id="infoPanel" hidden>
-  <h1>JN Apartment Builder <small style="font-weight:400;color:var(--muted)">· build 16</small></h1>
-  <p>Drag the wardrobe or the woman to move them; bathtub, WC and washbasin are fixed. Pieces snap to walls when they come within 10 cm, and can be dragged on through or outside them. Click a piece: a round arrow appears above it. Drag that arrow around the piece to turn it in 90° steps (or press R). Drag empty space to rotate the view, scroll or pinch to zoom. To paint a wall: switch on “Full-height walls”, then click a wall. Click the bed to type in its size. Positions, bed size and wall colours are saved in this browser.</p>
-  <button type="button" class="reset" id="resetAll">Reset layout and colours</button>
-  <details open id="sizes">
-    <summary>Rooms in cm</summary>
-    <table id="roomTable"></table>
-    <p class="note">Width × length. Total 47.0 m² as stated on the plan.</p>
-    <p class="note">Bad and Wohnküche continue 28 cm past the 263 / 449 line into the window recess. Shaft, stove wall block and corner notch are scaled from the plan drawing.</p>
-    <p class="note">Bad fixtures placed as on the plan: bathtub 70 × 160, rim height 57 (estimated); WC 37 × 72 and washbasin 45 × 56 scaled from the drawing.</p>
-    <p class="note">Zimmer 2: PAX corner wardrobe 185 × 160 × 236, depth 58, as a room divider at the door. Its exact position and which leg is the long one are estimated from the photo.</p>
-    <p class="note">Zimmer 2: bed, 140 × 200 to start with, mattress top at 45, head against the right wall.</p>
-    <p class="note">Windows sit at the white wall openings of the plan and stay visible when the walls are switched off. Figure in the Wohnküche: woman, 170 cm, for scale. “Walkaround” shows the apartment through her eyes. “Photoreal” loads a realistic walk-through view with real materials and daylight; furniture is moved here in plan mode only.</p>
-    <p class="note">Estimated, not on the plan: room height 240, wall thicknesses, door and window widths and positions, door height 200, window sill 90, window height 130.</p>
-  </details>
-</div>
-
 <div class="bar" role="group" aria-label="View">
   <button type="button" id="v3d" aria-pressed="true">3D view</button>
   <button type="button" id="vtop" aria-pressed="false">Top view</button>
   <button type="button" id="vwalls" aria-pressed="false">Full-height walls</button>
   <button type="button" id="vdims" aria-pressed="true">Measures</button>
-  <button type="button" id="vwalk" aria-pressed="false">Walkaround</button>
-  <button type="button" id="vphoto" aria-pressed="false">Photoreal</button>
-  <button type="button" id="vinfo" aria-pressed="false">Info</button>
+  <button type="button" id="vphoto" aria-pressed="false">Walkaround</button>
+  <button type="button" id="resetAll" title="Put furniture, bed size and wall colours back to the start">Reset</button>
 </div>
 
 <div class="hint" id="hint"></div>
@@ -593,15 +576,11 @@ body.walk .hint { display: block; }
     });
     addLabel(cm + ' cm', 'dim', (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, parent);
   }
-  var table = document.getElementById('roomTable');
   rooms.forEach(function (r) {
     dim([r.x0, 2, r.z1 - 20], [r.x1, 2, r.z1 - 20], r.w);       // width, along the lower wall
     dim([r.x1 - 20, 2, r.z0], [r.x1 - 20, 2, r.z1], r.l);       // length, along the right wall
     addLabel(r.name + '<small>' + r.area + ' m²</small>', 'tag',
       (r.x0 + r.x1) / 2 - 10, 2, (r.z0 + r.z1) / 2 - 10);
-    var tr = document.createElement('tr');
-    tr.innerHTML = '<th>' + r.name + '</th><td>' + r.w + ' × ' + r.l + '</td><td>' + r.area + ' m²</td>';
-    table.appendChild(tr);
   });
 
   // ---------- Person for scale: woman, 170 cm, slim athletic build, standing in the Wohnküche ----------
@@ -1096,8 +1075,6 @@ body.walk .hint { display: block; }
     });
   }
   toggle('vwalls', function (on) { wallsFull.visible = on; if (!on) closePaint(); });
-  // The info panel (help text, room sizes, reset button) is hidden until asked for.
-  toggle('vinfo', function (on) { document.getElementById('infoPanel').hidden = !on; });
   toggle('vdims', function (on) {
     dimGroup.visible = on;
     dimExtras.forEach(function (o) { o.visible = on; });
@@ -1108,7 +1085,7 @@ body.walk .hint { display: block; }
   var photoOn = false;
   var walking = false, walk = { x: 0, z: 0, yaw: 0, pitch: 0 }, keys = {}, lastT = performance.now();
   var EYE = 160, BODY = 20, WALK_SPEED = 140, TURN_SPEED = 1.9, wallsBefore = false;   // cm, cm, cm/s, rad/s
-  var walkBtn = document.getElementById('vwalk'), pad = document.getElementById('pad');
+  var pad = document.getElementById('pad');
   var wallsBtn = document.getElementById('vwalls'), dimsBtn = document.getElementById('vdims');
 
   // Solid floor-plan rectangles: every wall piece and window; door openings stay free.
@@ -1151,7 +1128,6 @@ body.walk .hint { display: block; }
     walking = on;
     var wasPhoto = photoOn;
     photoOn = on && !!photo;
-    walkBtn.setAttribute('aria-pressed', String(on && !photoOn));
     photoBtn.setAttribute('aria-pressed', String(photoOn));
     document.body.classList.toggle('walk', on);
     pad.hidden = !on;
@@ -1164,7 +1140,7 @@ body.walk .hint { display: block; }
       if (photoOn) {
         // Free camera, starting in the Wohnküche by the Flur door, looking into the room.
         walk.x = 330; walk.z = -110; walk.yaw = -0.77;
-        hintEl.textContent = 'Photoreal view: ' + WALK_HINT;
+        hintEl.textContent = 'Walkaround: ' + WALK_HINT;
         enterPhoto();
       } else {
         walk.x = woman.position.x; walk.z = woman.position.z;
@@ -1210,7 +1186,6 @@ body.walk .hint { display: block; }
     c.position.set(root.position.x + walk.x * 0.01, EYE * 0.01, root.position.z + walk.z * 0.01);
     c.rotation.set(walk.pitch, walk.yaw, 0);
   }
-  walkBtn.addEventListener('click', function () { setMode(walking && !photoOn ? 'plan' : 'walk'); });
   photoBtn.addEventListener('click', function () { setMode(photoOn ? 'plan' : 'photo'); });
   window.addEventListener('keydown', function (e) {
     if (!walking) return;
@@ -1463,7 +1438,7 @@ body.walk .hint { display: block; }
   }
   function showPhotoProgress() {
     if (!photoOn) return;
-    hintEl.textContent = 'Photoreal view: ' + (P.done < P.total
+    hintEl.textContent = 'Walkaround: ' + (P.done < P.total
       ? 'loading textures, sky and models (' + P.done + ' of ' + P.total + ') … you can already look around. '
       : '') + WALK_HINT;
   }
@@ -1521,7 +1496,6 @@ body.walk .hint { display: block; }
       P.camera.aspect = camera.aspect;
       P.camera.updateProjectionMatrix();
     }
-    if (vw < 520) document.getElementById('sizes').removeAttribute('open');
   }
   window.addEventListener('resize', resize);
   resize();
