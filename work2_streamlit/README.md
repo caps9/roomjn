@@ -7,7 +7,7 @@ A 3D planner for one apartment. The whole app is the single file `index.html`.
 
 | File | What it is |
 |---|---|
-| `index.html` | The app (build 18). Works on its own when opened in a browser. |
+| `index.html` | The app (build 19). Works on its own when opened in a browser. |
 | `streamlit_app.py` | Streamlit wrapper. Entry point for Streamlit. |
 | `requirements.txt` | Tells Streamlit which package to install. |
 | `.streamlit/config.toml` | Hides the Streamlit toolbar. Optional. |
@@ -31,7 +31,7 @@ streamlit run streamlit_app.py
 ## Good to know
 
 - Needs Streamlit 1.56 or newer. The wrapper uses `st.iframe`; the older `st.components.v1.html` was removed in 2026.
-- The app needs internet: it loads its 3D library, fonts and the Photoreal textures, sky and figure from public CDNs.
+- The app needs internet only for its 3D library and fonts, loaded from public CDNs. Floors and lighting are made in code.
 - Layout, bed size and wall colours are saved in the visitor's own browser, per address. Each visitor has their own; the online app starts fresh compared with the local file.
 - Click once inside the 3D view before using the keyboard.
 - To change the app, edit `index.html` only. `streamlit_app.py` does not need to change.
