@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JN Apartment Builder</title>
-<meta name="build" content="17">
+<meta name="build" content="18">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
   /* Layout: full-screen 3D viewport, one floating panel top-left, view buttons bottom-centre. */
   color-scheme: light;
-  --paper: #e9edf0;
+  --paper: #e7e1d8;
   --panel: #fbfcfd;
   --ink: #1d2730;
   --muted: #5d6b77;
@@ -212,7 +212,7 @@ body.walk .hint { display: block; }
   <label>Brightness <input type="range" id="paintVal" min="5" max="100" value="100"></label>
   <label>Hex code <input type="text" id="paintHex" maxlength="7" spellcheck="false" autocomplete="off"></label>
   <div class="swatches" id="paintSw" role="group" aria-label="Ready-made colours"></div>
-  <button type="button" id="paintReset">Back to plain white</button>
+  <button type="button" id="paintReset">Back to the original colour</button>
 </div>
 
 <div class="paint" id="sizeBox" role="dialog" aria-label="Bed size" hidden>
@@ -284,9 +284,32 @@ body.walk .hint { display: block; }
   var css = getComputedStyle(document.documentElement);
   var col = function (name) { return new THREE.Color(css.getPropertyValue(name).trim()); };
 
+  // ---------- Look: colours from the bedroom moodboard (warm sand, taupe, oak, dark brown) ----------
+  // Colours are written as they should appear on screen (sRGB) and converted for the renderer.
+  var LOOK = {
+    wall: '#d9cbb7',        // warm sand plaster
+    wallTop: '#3b2f27',     // cut wall tops, dark brown
+    frame: '#f1ece4',       // window frames, warm white
+    brass: '#b08d57',       // door thresholds
+    ground: '#d6cec2',      // ground around the apartment
+    woodTones: ['#9b7352', '#8a6446', '#a9805c', '#7a573c', '#b08862', '#946a48'],   // oak planks
+    tile: [92, 80, 71],     // Bad: warm taupe stone tiles (RGB), grout below
+    grout: '#b3a796'
+  };
+  function lin(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
+  // Physically based material: colour as on screen, roughness 0 (mirror) to 1 (matt), metalness 0 or 1.
+  function pbr(hex, rough, metal, extra) {
+    var o = extra || {};
+    o.color = lin(hex); o.roughness = rough; o.metalness = metal || 0;
+    return new THREE.MeshStandardMaterial(o);
+  }
+
   var renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(col('--paper'));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   stage.appendChild(renderer.domElement);
@@ -294,15 +317,32 @@ body.walk .hint { display: block; }
   var scene = new THREE.Scene();
   var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb9b2a6, 0.85));
-  var sun = new THREE.DirectionalLight(0xffffff, 0.55);
-  sun.position.set(5, 12, 7);
+  // Light: warm afternoon sun with soft shadows, a warm sky light, and a soft studio
+  // environment for reflections. The environment is made here in code: nothing to download.
+  var hemi = new THREE.HemisphereLight(0xfff1e0, 0x6b5643, 0.35);
+  scene.add(hemi);
+  var sun = new THREE.DirectionalLight(0xffe4c4, 2.3);
+  sun.position.set(4.5, 8, 6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -10; sun.shadow.camera.right = 10;
   sun.shadow.camera.top = 10; sun.shadow.camera.bottom = -10;
   sun.shadow.camera.far = 40;
+  sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
   scene.add(sun);
+  (function () {
+    var envScene = new THREE.Scene(), geo = new THREE.SphereGeometry(10, 32, 16), pos = geo.attributes.position, cols = [];
+    var top = lin('#fff6ea'), mid = lin('#e8dccb'), bottom = lin('#6e5a48');
+    for (var i = 0; i < pos.count; i++) {
+      var y = pos.getY(i) / 10, c = y > 0 ? mid.clone().lerp(top, y) : mid.clone().lerp(bottom, -y);
+      cols.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    envScene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true })));
+    var pm = new THREE.PMREMGenerator(renderer);
+    scene.environment = pm.fromScene(envScene, 0.04).texture;
+    pm.dispose();
+  })();
 
   // Everything is authored in cm inside "root", which is scaled to metres and centred.
   var root = new THREE.Group();
@@ -310,12 +350,12 @@ body.walk .hint { display: block; }
   root.position.set(-3.09, 0, 1.6);
   scene.add(root);
 
-  var sideMat = new THREE.MeshLambertMaterial({ color: 0xf3f1ec });
-  var topMat = new THREE.MeshLambertMaterial({ color: 0x5b6670 });
+  var sideMat = pbr(LOOK.wall, 0.92);
+  var topMat = pbr(LOOK.wallTop, 0.85);
   var wallMats = [sideMat, sideMat, topMat, sideMat, sideMat, sideMat];
-  var glassMat = new THREE.MeshPhongMaterial({ color: 0x9fd0ea, transparent: true, opacity: 0.45, shininess: 120 });
-  var sillMat = new THREE.MeshLambertMaterial({ color: 0xd9dee2 });
-  var frameMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  var glassMat = pbr('#cfe1e8', 0.05, 0, { transparent: true, opacity: 0.28, depthWrite: false });
+  var sillMat = pbr(LOOK.brass, 0.35, 1);
+  var frameMat = pbr(LOOK.frame, 0.45);
 
   function box(parent, x0, y0, z0, x1, y1, z1, mat, shadow) {
     if (x1 - x0 <= 0 || y1 - y0 <= 0 || z1 - z0 <= 0) return;
@@ -328,29 +368,40 @@ body.walk .hint { display: block; }
   }
 
   // ---------- Floors ----------
+  // Oak planks everywhere, warm stone tiles in the Bad. The texture coordinates follow
+  // real positions, so planks and tiles run on from room to room at their true size.
+  // The planks start as a drawn texture and switch to a photo texture once it has loaded.
+  var WOOD_SIZE = 220, TILE_SIZE = 240;     // cm covered by one repeat of the texture
+  var woodMat = new THREE.MeshStandardMaterial({ map: canvasTexture(1024, drawWood, true), roughness: 0.55 });
+  var tileMat = new THREE.MeshStandardMaterial({
+    map: canvasTexture(2048, function (g, n) { drawTiles(g, n, false); }, true),
+    bumpMap: canvasTexture(1024, function (g, n) { drawTiles(g, n, true); }, false), bumpScale: 0.004,
+    roughness: 0.4
+  });
+  woodMat.map.anisotropy = tileMat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  function floorPlane(parent, x0, z0, x1, z1, material, period) {
+    var geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
+    var pos = geo.attributes.position, uv = geo.attributes.uv, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    for (var i = 0; i < pos.count; i++) uv.setXY(i, (cx + pos.getX(i)) / period, (cz - pos.getY(i)) / period);
+    var m = new THREE.Mesh(geo, material);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(cx, 0, cz);
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  }
+  function isTiled(name) { return name === 'Bad'; }
   rooms.forEach(function (r) {
     r.x1 = r.x0 + r.w; r.z1 = r.z0 + r.l;
-    var f = new THREE.Mesh(
-      new THREE.PlaneGeometry(r.w, r.l),
-      new THREE.MeshLambertMaterial({ color: r.color, side: THREE.DoubleSide })
-    );
-    f.rotation.x = -Math.PI / 2;
-    f.position.set((r.x0 + r.x1) / 2, 0, (r.z0 + r.z1) / 2);
-    f.receiveShadow = true;
-    root.add(f);
+    if (isTiled(r.name)) floorPlane(root, r.x0, r.z0, r.x1, r.z1, tileMat, TILE_SIZE);
+    else floorPlane(root, r.x0, r.z0, r.x1, r.z1, woodMat, WOOD_SIZE);
   });
-
   // Window recess floors (Bad, Wohnküche), outside the measured rectangles.
-  [[135, -487, 282, -459], [291, -487, 553, -459]].forEach(function (a) {
-    var f = new THREE.Mesh(
-      new THREE.PlaneGeometry(a[2] - a[0], a[3] - a[1]),
-      new THREE.MeshLambertMaterial({ color: 0xcfe3ea, side: THREE.DoubleSide })
-    );
-    f.rotation.x = -Math.PI / 2;
-    f.position.set((a[0] + a[2]) / 2, 0, (a[1] + a[3]) / 2);
-    f.receiveShadow = true;
-    root.add(f);
-  });
+  floorPlane(root, 135, -487, 282, -459, tileMat, TILE_SIZE);
+  floorPlane(root, 291, -487, 553, -459, woodMat, WOOD_SIZE);
+  // Ground around the apartment, a little lower, so the building throws a shadow.
+  var ground = floorPlane(root, -500, -1300, 1100, 1000, pbr(LOOK.ground, 0.95), 100);
+  ground.position.y = -1;
 
   // ---------- Movable items ----------
   // Each item is a group whose origin is the centre of its footprint, so it turns
@@ -374,8 +425,8 @@ body.walk .hint { display: block; }
   function endItem() { cur = root; }
 
   // ---------- Bad fixtures, start positions scaled from the plan drawing ----------
-  var white = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  var basinMat = new THREE.MeshPhongMaterial({ color: 0xb9d3de, shininess: 120 });
+  var white = pbr('#f6f4f0', 0.12);          // glazed ceramic
+  var basinMat = pbr('#e9e6e1', 0.06);
 
   // Bathtub 70 x 160, rim height 57 (size estimated), left wall, 16 cm below the window wall.
   var TUB = { x0: 135, z0: -471, w: 70, l: 160, h: 57 };
@@ -408,10 +459,10 @@ body.walk .hint { display: block; }
   // Open, no doors. Wall leg (185) along the left wall, opening to the right;
   // divider leg (160) across the room, opening towards the door, back to the bed.
   (function () {
-    var body = new THREE.MeshLambertMaterial({ color: 0x4b4543 });
-    var inside = new THREE.MeshLambertMaterial({ color: 0x5a5350 });
-    var front = new THREE.MeshLambertMaterial({ color: 0x6a6360 });
-    var metal = new THREE.MeshPhongMaterial({ color: 0xb8bcc0, shininess: 90 });
+    var body = pbr('#4b4543', 0.55);
+    var inside = pbr('#5a5350', 0.7);
+    var front = pbr('#6a6360', 0.5);
+    var metal = pbr('#d4d7da', 0.22, 1);
     var Z0 = 10, Z1 = 195, ZC = 137, HT = 236;    // wall leg from Z0 to Z1, divider leg from ZC to Z1
     startItem('wardrobe', 80, (Z0 + Z1) / 2, 80, (Z1 - Z0) / 2);
     // Wall leg, x 0 to 58
@@ -443,10 +494,10 @@ body.walk .hint { display: block; }
   var BED_LIMITS = { w: [70, 240], l: [160, 240], h: [20, 80] };
   var bedSize = { w: 140, l: 200, h: 45 }, BED_AT = { x: 172, z: 339 };
   var bedMats = {
-    frame: new THREE.MeshLambertMaterial({ color: 0xb7a58f }),      // taupe upholstery
-    mattress: new THREE.MeshLambertMaterial({ color: 0xf3f1ec }),
-    pillow: new THREE.MeshLambertMaterial({ color: 0xffffff }),
-    duvet: new THREE.MeshLambertMaterial({ color: 0x8d7b6a })
+    frame: pbr('#b7a58f', 0.95),       // taupe upholstery
+    mattress: pbr('#efe9df', 0.9),
+    pillow: pbr('#f3eee6', 0.9),
+    duvet: pbr('#7d6a58', 0.95)        // brown throw, as in the moodboard
   };
   var bed = startItem('bed', BED_AT.x, BED_AT.z, bedSize.l / 2, bedSize.w / 2);
   endItem();
@@ -591,11 +642,11 @@ body.walk .hint { display: block; }
     P.rotation.y = womanFace;
     woman = startItem('woman', PX, PZ, 22, 22);
     cur.add(P);
-    var skin = new THREE.MeshLambertMaterial({ color: 0x9a9ea3 });    // grey
-    var shirt = new THREE.MeshLambertMaterial({ color: 0x1f8a8a });
-    var tights = new THREE.MeshLambertMaterial({ color: 0x2b3440 });
-    var shoe = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    var hair = new THREE.MeshLambertMaterial({ color: 0x4a2e1c });
+    var skin = pbr('#9a9ea3', 0.6);    // grey
+    var shirt = pbr('#1f8a8a', 0.8);
+    var tights = pbr('#2b3440', 0.7);
+    var shoe = pbr('#ffffff', 0.6);
+    var hair = pbr('#4a2e1c', 0.65);
     function part(geo, mat, x, y, z, sx, sy, sz) {
       var m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
@@ -775,7 +826,7 @@ body.walk .hint { display: block; }
   }
   var paints = {}, planPaint = {};       // wall key -> '#rrggbb'; colour -> plan material
   function planPaintMat(hex) {
-    return planPaint[hex] || (planPaint[hex] = new THREE.MeshLambertMaterial({ color: hex }));
+    return planPaint[hex] || (planPaint[hex] = pbr(hex, 0.92));
   }
   // Gives every wall piece in "group" its painted sides; unpainted pieces get their plain material back.
   function applyPaints(group, makeMat) {
@@ -800,8 +851,8 @@ body.walk .hint { display: block; }
     return key ? { key: key, room: key.split('|')[2] } : null;
   }
 
-  var PLAIN = '#f3f1ec';
-  var SWATCHES = ['#f3f1ec', '#efe6d8', '#d9c7a8', '#b9a58e', '#8d7b6a', '#6b5240',
+  var PLAIN = LOOK.wall;
+  var SWATCHES = [LOOK.wall, '#efe6d8', '#d9c7a8', '#b9a58e', '#8d7b6a', '#6b5240',
                   '#a9b8a0', '#6f8572', '#9fb3c4', '#5d7890', '#c0704f', '#3a3f45'];
   var paintEl = document.getElementById('paint'), wheel = document.getElementById('paintWheel');
   var paintVal = document.getElementById('paintVal'), paintHex = document.getElementById('paintHex');
@@ -1224,7 +1275,7 @@ body.walk .hint { display: block; }
     rgbeLoader: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js',
     sky: PH + 'HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr',
     wood: 'laminate_floor_02',      // Poly Haven texture name (CC0)
-    woodTint: 0xd9b08c,             // warms the pale photo planks to the real medium oak brown
+    woodTint: 0xc39a76,             // warms the pale photo planks to the moodboard oak
     woman: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/models/gltf/Xbot.glb',
     woodSize: 220, tileSize: 240,   // cm covered by one repeat of the texture
     env: 0.6, envFloor: 0.3         // how strongly the sky lights walls and furniture / the floors
@@ -1247,7 +1298,7 @@ body.walk .hint { display: block; }
     return t;
   }
   function drawWood(g, n) {
-    var tones = ['#8a6a4a', '#a8845c', '#6b5240', '#93714e', '#7b5e44'], rows = 11, h = n / rows;
+    var tones = LOOK.woodTones, rows = 11, h = n / rows;
     for (var r = 0; r < rows; r++) {
       var x = -Math.random() * n * 0.4;
       while (x < n) {
@@ -1266,16 +1317,16 @@ body.walk .hint { display: block; }
       g.fillRect(Math.random() * n, Math.random() * n, 20 + Math.random() * 60, 1);
     }
   }
-  // Anthracite tiles, 60 x 30 cm, half offset, light grey grout: 4 x 8 tiles per repeat.
+  // Warm taupe stone tiles, 60 x 30 cm, half offset, light grout: 4 x 8 tiles per repeat.
   // With "bump" it draws the height map instead: tiles white (high), grout black (low).
   function drawTiles(g, n, bump) {
-    g.fillStyle = bump ? '#000' : '#8f9296';
+    g.fillStyle = bump ? '#000' : LOOK.grout;
     g.fillRect(0, 0, n, n);
     var w = n / 4, h = n / 8, gap = n / 340;
     for (var r = 0; r < 8; r++) {
       for (var c = -1; c < 4; c++) {
-        var v = 38 + Math.floor(Math.random() * 9);
-        g.fillStyle = bump ? '#fff' : 'rgb(' + v + ',' + (v + 3) + ',' + (v + 8) + ')';
+        var v = Math.floor(Math.random() * 12) - 6, t = LOOK.tile;
+        g.fillStyle = bump ? '#fff' : 'rgb(' + (t[0] + v) + ',' + (t[1] + v) + ',' + (t[2] + v) + ')';
         g.fillRect((c + (r % 2) * 0.5) * w + gap, r * h + gap, w - 2 * gap, h - 2 * gap);
       }
     }
@@ -1329,10 +1380,10 @@ body.walk .hint { display: block; }
         bumpMap: canvasTexture(1024, function (g, n) { drawTiles(g, n, true); }, false), bumpScale: 0.004,
         roughness: 0.55, envMapIntensity: 0.25
       }),
-      wall: std({ color: 0xf4f3ef, roughness: 0.93 }),
+      wall: std({ color: lin(LOOK.wall), roughness: 0.92 }),
       ceiling: std({ color: 0xffffff, roughness: 0.96 }),
-      frame: std({ color: 0xffffff, roughness: 0.35 }),
-      brass: std({ color: 0xb08d57, metalness: 1, roughness: 0.32, envMapIntensity: 1 }),
+      frame: std({ color: lin(LOOK.frame), roughness: 0.4 }),
+      brass: std({ color: lin(LOOK.brass), metalness: 1, roughness: 0.32, envMapIntensity: 1 }),
       chrome: std({ color: 0xd9dde0, metalness: 1, roughness: 0.14, envMapIntensity: 1 }),
       ceramic: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.8 }),
       glass: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.02, transparent: true, opacity: 0.12, depthWrite: false, envMapIntensity: 1.2 })
@@ -1350,13 +1401,13 @@ body.walk .hint { display: block; }
       m.receiveShadow = true;
       P.root.add(m);
     }
-    var tiled = { 'Bad': 1, 'Wohnküche': 1 };
+    var tiled = { 'Bad': 1 };
     rooms.forEach(function (rm) {
       if (tiled[rm.name]) floor(rm.x0, rm.z0, rm.x1, rm.z1, M.tile, PHOTO.tileSize);
       else floor(rm.x0, rm.z0, rm.x1, rm.z1, M.wood, PHOTO.woodSize);
     });
     floor(135, -487, 282, -459, M.tile, PHOTO.tileSize);     // window recess, Bad
-    floor(291, -487, 553, -459, M.tile, PHOTO.tileSize);     // window recess, Wohnküche
+    floor(291, -487, 553, -459, M.wood, PHOTO.woodSize);     // window recess, Wohnküche
 
     // Ceiling: faces down, lets no sun in from above.
     var ceil = new THREE.Mesh(new THREE.PlaneGeometry(678, 1197), M.ceiling);
@@ -1395,7 +1446,7 @@ body.walk .hint { display: block; }
       texture(name, 'rough', false, function (t) { mat.roughnessMap = t; mat.roughness = 1; mat.needsUpdate = true; });
     }
     textureSet(PHOTO.wood, M.wood, PHOTO.woodTint);
-    // The tiles stay drawn: no free photo texture matches the real anthracite 30 x 60 tiles.
+    // The Bad tiles stay drawn, in the moodboard's warm taupe.
 
     begin();
     loadScript(PHOTO.rgbeLoader, function (ok) {
@@ -1447,8 +1498,8 @@ body.walk .hint { display: block; }
     if (P.pbr[m.uuid]) return P.pbr[m.uuid];
     var out;
     if (m === white || m === basinMat) out = P.mat.ceramic;
-    else if (m.isMeshPhongMaterial) out = P.mat.chrome;
-    else out = new THREE.MeshStandardMaterial({ color: m.color.getHex(), roughness: 0.6, envMapIntensity: PHOTO.env });
+    else if (m.metalness > 0.5) out = P.mat.chrome;
+    else { out = m.clone(); out.envMapIntensity = PHOTO.env; }    // plan materials are already physically based
     return (P.pbr[m.uuid] = out);
   }
   // Copies the furniture from plan mode, where it stands right now.
@@ -1472,7 +1523,7 @@ body.walk .hint { display: block; }
     });
     // Painted walls carry over from plan mode.
     applyPaints(P.walls, function (hex) {
-      return P.paint[hex] || (P.paint[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.93, envMapIntensity: PHOTO.env }));
+      return P.paint[hex] || (P.paint[hex] = new THREE.MeshStandardMaterial({ color: lin(hex), roughness: 0.92, envMapIntensity: PHOTO.env }));
     });
     P.renderer.shadowMap.needsUpdate = true;
   }
@@ -1538,6 +1589,23 @@ body.walk .hint { display: block; }
     requestAnimationFrame(frame);
   }
   loadState();
+  // Photo texture for the oak planks, loaded in the background once the page is up.
+  setTimeout(function () {
+    var loader = new THREE.TextureLoader(), aniso = renderer.capabilities.getMaxAnisotropy();
+    var base = PH + 'Textures/jpg/1k/' + PHOTO.wood + '/' + PHOTO.wood + '_';
+    function get(kind, srgb, apply) {
+      loader.load(base + kind + '_1k.jpg', function (t) {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        if (srgb) t.encoding = THREE.sRGBEncoding;
+        t.anisotropy = aniso;
+        apply(t);
+        woodMat.needsUpdate = true;
+      });
+    }
+    get('diff', true, function (t) { woodMat.map = t; woodMat.color.setHex(PHOTO.woodTint); });
+    get('nor_gl', false, function (t) { woodMat.normalMap = t; });
+    get('rough', false, function (t) { woodMat.roughnessMap = t; woodMat.roughness = 1; });
+  }, 600);
   frame();
 })();
 </script>
