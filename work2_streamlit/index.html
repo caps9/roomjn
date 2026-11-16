@@ -284,7 +284,9 @@ body.walk .hint { display: block; }
   var css = getComputedStyle(document.documentElement);
   var col = function (name) { return new THREE.Color(css.getPropertyValue(name).trim()); };
 
-  // ---------- Look: colours from the bedroom moodboard (warm sand, taupe, oak, dark brown) ----------
+  // ---------- Look ----------
+  // Walls: colours from the bedroom moodboard (warm sand, dark brown).
+  // Floors: as in the walkthrough video of the real apartment (real_videolook.md).
   // Colours are written as they should appear on screen (sRGB) and converted for the renderer.
   var LOOK = {
     wall: '#d9cbb7',        // warm sand plaster
@@ -292,9 +294,10 @@ body.walk .hint { display: block; }
     frame: '#f1ece4',       // window frames, warm white
     brass: '#b08d57',       // door thresholds
     ground: '#d6cec2',      // ground around the apartment
-    woodTones: ['#9b7352', '#8a6446', '#a9805c', '#7a573c', '#b08862', '#946a48'],   // oak planks
-    tile: [92, 80, 71],     // Bad: warm taupe stone tiles (RGB), grout below
-    grout: '#b3a796'
+    // Wood-look oak planks: medium brown, with clearly lighter honey and darker grey-brown planks.
+    woodTones: ['#8a6a4a', '#a8845c', '#6b5240', '#977452', '#7c5f45', '#b08d64', '#6e5a4a'],
+    tile: [44, 47, 52],     // Bad and Wohnküche: anthracite slate-look tiles (RGB) ...
+    grout: '#9a9da1'        // ... with light grey grout
   };
   function lin(hex) { return new THREE.Color(hex).convertSRGBToLinear(); }
   // Physically based material: colour as on screen, roughness 0 (mirror) to 1 (matt), metalness 0 or 1.
@@ -309,7 +312,7 @@ body.walk .hint { display: block; }
   renderer.setClearColor(col('--paper'));
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.8;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   stage.appendChild(renderer.domElement);
@@ -321,7 +324,7 @@ body.walk .hint { display: block; }
   // environment for reflections. The environment is made here in code: nothing to download.
   var hemi = new THREE.HemisphereLight(0xfff1e0, 0x6b5643, 0.35);
   scene.add(hemi);
-  var sun = new THREE.DirectionalLight(0xffe4c4, 2.3);
+  var sun = new THREE.DirectionalLight(0xffe4c4, 2.0);
   sun.position.set(4.5, 8, 6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -332,7 +335,7 @@ body.walk .hint { display: block; }
   scene.add(sun);
   (function () {
     var envScene = new THREE.Scene(), geo = new THREE.SphereGeometry(10, 32, 16), pos = geo.attributes.position, cols = [];
-    var top = lin('#fff6ea'), mid = lin('#e8dccb'), bottom = lin('#6e5a48');
+    var top = lin('#d8cdbf'), mid = lin('#b9ab99'), bottom = lin('#4f4135');
     for (var i = 0; i < pos.count; i++) {
       var y = pos.getY(i) / 10, c = y > 0 ? mid.clone().lerp(top, y) : mid.clone().lerp(bottom, -y);
       cols.push(c.r, c.g, c.b);
@@ -368,21 +371,30 @@ body.walk .hint { display: block; }
   }
 
   // ---------- Floors ----------
-  // Oak planks everywhere, warm stone tiles in the Bad. The texture coordinates follow
-  // real positions, so planks and tiles run on from room to room at their true size.
-  // The planks start as a drawn texture and switch to a photo texture once it has loaded.
+  // Wood-look planks in Zimmer 1, Zimmer 2, Flur and Wintergarten; anthracite tiles in the Bad
+  // and the Wohnküche, as in the real apartment. The texture coordinates follow real positions,
+  // so planks and tiles run on from room to room at their true size. The planks run towards
+  // the Zimmer window wall (along z). Both textures are drawn in code: nothing to download.
   var WOOD_SIZE = 220, TILE_SIZE = 240;     // cm covered by one repeat of the texture
-  var woodMat = new THREE.MeshStandardMaterial({ map: canvasTexture(1024, drawWood, true), roughness: 0.55 });
+  var woodMat = new THREE.MeshStandardMaterial({
+    map: canvasTexture(2048, function (g, n) { drawWood(g, n, false); }, true),
+    bumpMap: canvasTexture(1024, function (g, n) { drawWood(g, n, true); }, false), bumpScale: 0.003,
+    roughness: 0.6
+  });
   var tileMat = new THREE.MeshStandardMaterial({
     map: canvasTexture(2048, function (g, n) { drawTiles(g, n, false); }, true),
     bumpMap: canvasTexture(1024, function (g, n) { drawTiles(g, n, true); }, false), bumpScale: 0.004,
-    roughness: 0.4
+    roughness: 0.62
   });
   woodMat.map.anisotropy = tileMat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  function floorPlane(parent, x0, z0, x1, z1, material, period) {
+  // With "along" the texture is turned so its long side (the planks) runs along z.
+  function floorPlane(parent, x0, z0, x1, z1, material, period, along) {
     var geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
     var pos = geo.attributes.position, uv = geo.attributes.uv, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    for (var i = 0; i < pos.count; i++) uv.setXY(i, (cx + pos.getX(i)) / period, (cz - pos.getY(i)) / period);
+    for (var i = 0; i < pos.count; i++) {
+      var wx = (cx + pos.getX(i)) / period, wz = (cz - pos.getY(i)) / period;
+      if (along) uv.setXY(i, wz, wx); else uv.setXY(i, wx, wz);
+    }
     var m = new THREE.Mesh(geo, material);
     m.rotation.x = -Math.PI / 2;
     m.position.set(cx, 0, cz);
@@ -390,15 +402,15 @@ body.walk .hint { display: block; }
     parent.add(m);
     return m;
   }
-  function isTiled(name) { return name === 'Bad'; }
+  function isTiled(name) { return name === 'Bad' || name === 'Wohnküche'; }
   rooms.forEach(function (r) {
     r.x1 = r.x0 + r.w; r.z1 = r.z0 + r.l;
     if (isTiled(r.name)) floorPlane(root, r.x0, r.z0, r.x1, r.z1, tileMat, TILE_SIZE);
-    else floorPlane(root, r.x0, r.z0, r.x1, r.z1, woodMat, WOOD_SIZE);
+    else floorPlane(root, r.x0, r.z0, r.x1, r.z1, woodMat, WOOD_SIZE, true);
   });
   // Window recess floors (Bad, Wohnküche), outside the measured rectangles.
   floorPlane(root, 135, -487, 282, -459, tileMat, TILE_SIZE);
-  floorPlane(root, 291, -487, 553, -459, woodMat, WOOD_SIZE);
+  floorPlane(root, 291, -487, 553, -459, tileMat, TILE_SIZE);
   // Ground around the apartment, a little lower, so the building throws a shadow.
   var ground = floorPlane(root, -500, -1300, 1100, 1000, pbr(LOOK.ground, 0.95), 100);
   ground.position.y = -1;
@@ -1274,8 +1286,6 @@ body.walk .hint { display: block; }
     gltfLoader: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
     rgbeLoader: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js',
     sky: PH + 'HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr',
-    wood: 'laminate_floor_02',      // Poly Haven texture name (CC0)
-    woodTint: 0xc39a76,             // warms the pale photo planks to the moodboard oak
     woman: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/models/gltf/Xbot.glb',
     woodSize: 220, tileSize: 240,   // cm covered by one repeat of the texture
     env: 0.6, envFloor: 0.3         // how strongly the sky lights walls and furniture / the floors
@@ -1297,27 +1307,70 @@ body.walk .hint { display: block; }
     if (srgb) t.encoding = THREE.sRGBEncoding;
     return t;
   }
-  function drawWood(g, n) {
-    var tones = LOOK.woodTones, rows = 11, h = n / rows;
-    for (var r = 0; r < rows; r++) {
-      var x = -Math.random() * n * 0.4;
-      while (x < n) {
-        var len = n * (0.25 + Math.random() * 0.25);
-        g.fillStyle = tones[Math.floor(Math.random() * tones.length)];
-        g.fillRect(x, r * h, len, h);
-        g.fillStyle = 'rgba(40, 28, 18, .55)';
-        g.fillRect(x, r * h, 1.5, h);
+  // Wood-look planks as in the video: short planks of mixed lengths with staggered joints,
+  // medium oak with lighter honey and darker grey-brown planks next to each other.
+  // One repeat is 11 rows of 20 cm planks; each row wraps round, so the repeat has no seam.
+  // The layout is fixed (seeded), so the colour and the joint height map line up.
+  // With "bump" it draws the height map: planks white (high), joints black (low).
+  var plankLayout = null;
+  function plankRows() {
+    if (plankLayout) return plankLayout;
+    var seed = 20261116;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    plankLayout = [];
+    for (var r = 0; r < 11; r++) {
+      var start = rnd(), x = start, row = [];
+      while (x < start + 1 - 0.2) {
+        var len = Math.min(0.27 + rnd() * 0.33, start + 1 - x);
+        if (start + 1 - (x + len) < 0.2) len = start + 1 - x;      // no sliver at the end of the row
+        row.push({ x: x, len: len, tone: Math.floor(rnd() * LOOK.woodTones.length), shade: rnd() - 0.5, grain: rnd() });
         x += len;
       }
-      g.fillStyle = 'rgba(40, 28, 18, .55)';
-      g.fillRect(0, r * h, n, 1.5);
+      plankLayout.push(row);
     }
-    for (var i = 0; i < 2600; i++) {       // grain
-      g.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '255,235,200' : '30,20,10') + ', .05)';
-      g.fillRect(Math.random() * n, Math.random() * n, 20 + Math.random() * 60, 1);
-    }
+    return plankLayout;
   }
-  // Warm taupe stone tiles, 60 x 30 cm, half offset, light grout: 4 x 8 tiles per repeat.
+  function drawWood(g, n, bump) {
+    var rows = plankRows(), h = n / rows.length, joint = Math.max(1.5, n / 1000);
+    g.fillStyle = bump ? '#000' : '#3a2a1e';
+    g.fillRect(0, 0, n, n);
+    rows.forEach(function (row, r) {
+      row.forEach(function (p) {
+        [-1, 0].forEach(function (wrap) {          // draw each plank twice so the row wraps round
+          var x = (p.x + wrap) * n, w = p.len * n, y = r * h;
+          if (x + w < 0 || x > n) return;
+          if (bump) { g.fillStyle = '#fff'; g.fillRect(x + joint, y + joint, w - 2 * joint, h - 2 * joint); return; }
+          var base = new THREE.Color(LOOK.woodTones[p.tone]).offsetHSL(0, 0, p.shade * 0.05);
+          var grad = g.createLinearGradient(x, 0, x + w, 0);
+          grad.addColorStop(0, '#' + base.clone().offsetHSL(0, 0, -0.02).getHexString());
+          grad.addColorStop(0.5, '#' + base.getHexString());
+          grad.addColorStop(1, '#' + base.clone().offsetHSL(0, 0, 0.02).getHexString());
+          g.fillStyle = grad;
+          g.fillRect(x + joint, y + joint, w - 2 * joint, h - 2 * joint);
+          // Grain: long, slightly wavy lines along the plank.
+          g.save();
+          g.beginPath(); g.rect(x + joint, y + joint, w - 2 * joint, h - 2 * joint); g.clip();
+          var lines = 9 + Math.floor(p.grain * 8), seedY = p.grain * 1000;
+          for (var k = 0; k < lines; k++) {
+            var ly = y + h * ((k + 0.5) / lines) + Math.sin(seedY + k * 3.1) * h * 0.04;
+            g.strokeStyle = 'rgba(' + (k % 3 === 0 ? '255,230,190,.10' : '45,30,18,.13') + ')';
+            g.lineWidth = Math.max(1, h / 60) * (1 + (k % 4) * 0.4);
+            g.beginPath(); g.moveTo(x, ly);
+            for (var s2 = 1; s2 <= 8; s2++) {
+              g.lineTo(x + w * s2 / 8, ly + Math.sin(seedY * 0.37 + k + s2 * 0.9) * h * 0.06);
+            }
+            g.stroke();
+          }
+          if (p.grain > 0.72) {                     // an occasional small knot
+            g.fillStyle = 'rgba(55,36,22,.35)';
+            g.beginPath(); g.ellipse(x + w * (0.2 + p.grain * 0.6), y + h * 0.5, h * 0.12, h * 0.06, 0, 0, 2 * Math.PI); g.fill();
+          }
+          g.restore();
+        });
+      });
+    });
+  }
+  // Anthracite slate-look tiles, 60 x 30 cm, half offset, light grey grout: 4 x 8 tiles per repeat.
   // With "bump" it draws the height map instead: tiles white (high), grout black (low).
   function drawTiles(g, n, bump) {
     g.fillStyle = bump ? '#000' : LOOK.grout;
@@ -1325,12 +1378,16 @@ body.walk .hint { display: block; }
     var w = n / 4, h = n / 8, gap = n / 340;
     for (var r = 0; r < 8; r++) {
       for (var c = -1; c < 4; c++) {
-        var v = Math.floor(Math.random() * 12) - 6, t = LOOK.tile;
+        var v = Math.floor(Math.random() * 8) - 4, t = LOOK.tile;
         g.fillStyle = bump ? '#fff' : 'rgb(' + (t[0] + v) + ',' + (t[1] + v) + ',' + (t[2] + v) + ')';
         g.fillRect((c + (r % 2) * 0.5) * w + gap, r * h + gap, w - 2 * gap, h - 2 * gap);
       }
     }
     if (bump) return;
+    for (var j = 0; j < 140; j++) {        // soft slate-like clouding
+      g.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '255,255,255' : '0,0,0') + ', .025)';
+      g.beginPath(); g.arc(Math.random() * n, Math.random() * n, n * (0.01 + Math.random() * 0.04), 0, 2 * Math.PI); g.fill();
+    }
     for (var i = 0; i < 5000; i++) {       // fine speckle
       g.fillStyle = 'rgba(' + (Math.random() < 0.5 ? '255,255,255' : '0,0,0') + ', .035)';
       g.fillRect(Math.random() * n, Math.random() * n, 2 + Math.random() * 5, 2 + Math.random() * 5);
@@ -1374,11 +1431,11 @@ body.walk .hint { display: block; }
     // Materials
     function std(o) { o.envMapIntensity = o.envMapIntensity || PHOTO.env; return new THREE.MeshStandardMaterial(o); }
     var M = P.mat = {
-      wood: std({ map: canvasTexture(1024, drawWood, true), roughness: 0.55, envMapIntensity: PHOTO.envFloor }),
+      wood: std({ map: woodMat.map, bumpMap: woodMat.bumpMap, bumpScale: 0.003, roughness: 0.6, envMapIntensity: PHOTO.envFloor }),
       tile: std({
         map: canvasTexture(2048, function (g, n) { drawTiles(g, n, false); }, true),
         bumpMap: canvasTexture(1024, function (g, n) { drawTiles(g, n, true); }, false), bumpScale: 0.004,
-        roughness: 0.55, envMapIntensity: 0.25
+        roughness: 0.62, envMapIntensity: 0.25
       }),
       wall: std({ color: lin(LOOK.wall), roughness: 0.92 }),
       ceiling: std({ color: 0xffffff, roughness: 0.96 }),
@@ -1394,20 +1451,23 @@ body.walk .hint { display: block; }
     function floor(x0, z0, x1, z1, mat, period) {
       var geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
       var pos = geo.attributes.position, uv = geo.attributes.uv, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-      for (var i = 0; i < pos.count; i++) uv.setXY(i, (cx + pos.getX(i)) / period, (cz - pos.getY(i)) / period);
+      for (var i = 0; i < pos.count; i++) {
+        var wx = (cx + pos.getX(i)) / period, wz = (cz - pos.getY(i)) / period;
+        if (mat === M.wood) uv.setXY(i, wz, wx); else uv.setXY(i, wx, wz);     // planks run along z
+      }
       var m = new THREE.Mesh(geo, mat);
       m.rotation.x = -Math.PI / 2;
       m.position.set(cx, 0, cz);
       m.receiveShadow = true;
       P.root.add(m);
     }
-    var tiled = { 'Bad': 1 };
+    var tiled = { 'Bad': 1, 'Wohnküche': 1 };
     rooms.forEach(function (rm) {
       if (tiled[rm.name]) floor(rm.x0, rm.z0, rm.x1, rm.z1, M.tile, PHOTO.tileSize);
       else floor(rm.x0, rm.z0, rm.x1, rm.z1, M.wood, PHOTO.woodSize);
     });
     floor(135, -487, 282, -459, M.tile, PHOTO.tileSize);     // window recess, Bad
-    floor(291, -487, 553, -459, M.wood, PHOTO.woodSize);     // window recess, Wohnküche
+    floor(291, -487, 553, -459, M.tile, PHOTO.tileSize);     // window recess, Wohnküche
 
     // Ceiling: faces down, lets no sun in from above.
     var ceil = new THREE.Mesh(new THREE.PlaneGeometry(678, 1197), M.ceiling);
@@ -1427,7 +1487,7 @@ body.walk .hint { display: block; }
 
     // ---- Downloads. Each one swaps in when it arrives; a failure keeps the stand-in.
     var loader = new THREE.TextureLoader(), aniso = r.capabilities.getMaxAnisotropy();
-    M.tile.map.anisotropy = M.wood.map.anisotropy = aniso;
+    M.tile.map.anisotropy = aniso;
     function begin() { P.total++; showPhotoProgress(); }
     function finish() { P.done++; r.shadowMap.needsUpdate = true; showPhotoProgress(); }
     function texture(name, kind, srgb, apply) {
@@ -1445,8 +1505,7 @@ body.walk .hint { display: block; }
       texture(name, 'nor_gl', false, function (t) { mat.normalMap = t; mat.needsUpdate = true; });
       texture(name, 'rough', false, function (t) { mat.roughnessMap = t; mat.roughness = 1; mat.needsUpdate = true; });
     }
-    textureSet(PHOTO.wood, M.wood, PHOTO.woodTint);
-    // The Bad tiles stay drawn, in the moodboard's warm taupe.
+    // Floors stay drawn (planks and tiles as in the walkthrough video): no download.
 
     begin();
     loadScript(PHOTO.rgbeLoader, function (ok) {
@@ -1589,23 +1648,6 @@ body.walk .hint { display: block; }
     requestAnimationFrame(frame);
   }
   loadState();
-  // Photo texture for the oak planks, loaded in the background once the page is up.
-  setTimeout(function () {
-    var loader = new THREE.TextureLoader(), aniso = renderer.capabilities.getMaxAnisotropy();
-    var base = PH + 'Textures/jpg/1k/' + PHOTO.wood + '/' + PHOTO.wood + '_';
-    function get(kind, srgb, apply) {
-      loader.load(base + kind + '_1k.jpg', function (t) {
-        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        if (srgb) t.encoding = THREE.sRGBEncoding;
-        t.anisotropy = aniso;
-        apply(t);
-        woodMat.needsUpdate = true;
-      });
-    }
-    get('diff', true, function (t) { woodMat.map = t; woodMat.color.setHex(PHOTO.woodTint); });
-    get('nor_gl', false, function (t) { woodMat.normalMap = t; });
-    get('rough', false, function (t) { woodMat.roughnessMap = t; woodMat.roughness = 1; });
-  }, 600);
   frame();
 })();
 </script>
