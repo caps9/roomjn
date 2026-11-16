@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JN Apartment Builder</title>
-<meta name="build" content="18">
+<meta name="build" content="19">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -32,10 +32,6 @@ body {
 #stage:active { cursor: grabbing; }
 #stage canvas { display: block; width: 100%; height: 100%; }
 #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-/* Photoreal view: its own canvas on top of the plan view. Pointer input still goes to #stage. */
-#photo { position: fixed; inset: 0; pointer-events: none; background: #cfdcea; }
-#photo[hidden] { display: none; }
-#photo canvas { display: block; width: 100%; height: 100%; }
 .dim, .tag {
   position: absolute; left: 0; top: 0;
   transform: translate(-50%, -50%);
@@ -183,7 +179,6 @@ body.walk .hint { display: block; }
 <body>
 <div id="stage"></div>
 <div id="labels"></div>
-<div id="photo" hidden></div>
 
 <div class="bar" role="group" aria-label="View">
   <button type="button" id="v3d" aria-pressed="true">3D view</button>
@@ -610,8 +605,17 @@ body.walk .hint { display: block; }
   }
   var wallsFull = new THREE.Group(), windows = new THREE.Group();
   buildWalls(wallsFull, windows);
+  box(wallsFull, 116, 0.6, -135, 122, DOOR_H, -45, frameMat);      // closed entrance door
   wallsFull.visible = false;
   root.add(wallsFull, windows);
+  // Ceiling: shown only in Walkaround. It also keeps the sun out from above, so daylight
+  // comes in through the windows.
+  var ceiling = new THREE.Mesh(new THREE.PlaneGeometry(678, 1197), pbr('#f4f1ec', 0.95));
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set(309, H, -159.5);
+  ceiling.castShadow = true;
+  ceiling.visible = false;
+  root.add(ceiling);
 
   // ---------- Measures and room names ----------
   var labels = [], dimGroup = new THREE.Group();
@@ -1144,8 +1148,7 @@ body.walk .hint { display: block; }
     document.body.classList.toggle('no-dims', !on);
   });
 
-  // ---------- Walkaround: first-person view through the woman's eyes ----------
-  var photoOn = false;
+  // ---------- Walkaround: first-person walk through the apartment ----------
   var walking = false, walk = { x: 0, z: 0, yaw: 0, pitch: 0 }, keys = {}, lastT = performance.now();
   var EYE = 160, BODY = 20, WALK_SPEED = 140, TURN_SPEED = 1.9, wallsBefore = false;   // cm, cm, cm/s, rad/s
   var pad = document.getElementById('pad');
@@ -1177,21 +1180,14 @@ body.walk .hint { display: block; }
     dimGroup.visible = on;
     dimExtras.forEach(function (o) { o.visible = on; });
   }
-  var hintEl = document.getElementById('hint'), photoBtn = document.getElementById('vphoto');
-  var WALK_HINT = 'W A S D or the arrow keys to move and turn, drag to look around, Esc or the button to leave.';
-  // The three modes: 'plan' (default, lightweight), 'walk' (first person in the plan look),
-  // 'photo' (first person in the photoreal view).
-  function setMode(m) {
-    setWalk(false);
-    if (m === 'walk') setWalk(true, false);
-    if (m === 'photo') setWalk(true, true);
-  }
-  function setWalk(on, photo) {
+  var hintEl = document.getElementById('hint'), walkBtn = document.getElementById('vphoto');
+  hintEl.textContent = 'Walkaround: W A S D or the arrow keys to move and turn, drag to look around, Esc or the button to leave.';
+  // Walkaround uses the same renderer, scene and camera as the 3D and top views.
+  // The camera is free; it starts in the Wohnküche by the Flur door, looking into the room.
+  function setWalk(on) {
     if (on === walking) return;
     walking = on;
-    var wasPhoto = photoOn;
-    photoOn = on && !!photo;
-    photoBtn.setAttribute('aria-pressed', String(photoOn));
+    walkBtn.setAttribute('aria-pressed', String(on));
     document.body.classList.toggle('walk', on);
     pad.hidden = !on;
     keys = {};
@@ -1199,32 +1195,15 @@ body.walk .hint { display: block; }
       select(null);
       closePaint();
       goal = null; markView(null);
-      walk.pitch = 0;
-      if (photoOn) {
-        // Free camera, starting in the Wohnküche by the Flur door, looking into the room.
-        walk.x = 330; walk.z = -110; walk.yaw = -0.77;
-        hintEl.textContent = 'Walkaround: ' + WALK_HINT;
-        enterPhoto();
-      } else {
-        walk.x = woman.position.x; walk.z = woman.position.z;
-        walk.yaw = woman.rotation.y + womanFace + Math.PI;    // the camera looks along -z, the figure faces +z
-        woman.visible = false;
-        hintEl.textContent = 'Walkaround: ' + WALK_HINT;
-      }
+      walk.x = 330; walk.z = -110; walk.yaw = -0.77; walk.pitch = 0;
       wallsBefore = wallsFull.visible;
       wallsFull.visible = true; wallsBtn.setAttribute('aria-pressed', 'true');
+      ceiling.visible = true;
       showDims(false);
       camera.rotation.order = 'YXZ';
       camera.near = 0.05;
     } else {
-      if (wasPhoto) {
-        leavePhoto();
-      } else {
-        // The woman stays where the walk ended.
-        woman.position.x = Math.round(walk.x); woman.position.z = Math.round(walk.z);
-        woman.visible = true;
-        saveState();
-      }
+      ceiling.visible = false;
       wallsFull.visible = wallsBefore; wallsBtn.setAttribute('aria-pressed', String(wallsBefore));
       showDims(dimsBtn.getAttribute('aria-pressed') === 'true');
       camera.near = 0.1;
@@ -1245,11 +1224,10 @@ body.walk .hint { display: block; }
       if (stuck || !blocked(walk.x + dx, walk.z)) walk.x += dx;
       if (stuck || !blocked(walk.x, walk.z + dz)) walk.z += dz;
     }
-    var c = photoOn ? P.camera : camera;
-    c.position.set(root.position.x + walk.x * 0.01, EYE * 0.01, root.position.z + walk.z * 0.01);
-    c.rotation.set(walk.pitch, walk.yaw, 0);
+    camera.position.set(root.position.x + walk.x * 0.01, EYE * 0.01, root.position.z + walk.z * 0.01);
+    camera.rotation.set(walk.pitch, walk.yaw, 0);
   }
-  photoBtn.addEventListener('click', function () { setMode(photoOn ? 'plan' : 'photo'); });
+  walkBtn.addEventListener('click', function () { setWalk(!walking); });
   window.addEventListener('keydown', function (e) {
     if (!walking) return;
     if (e.code === 'Escape') { setWalk(false); return; }
@@ -1270,34 +1248,7 @@ body.walk .hint { display: block; }
     });
   });
 
-  // ---------- Photoreal view ----------
-  // Nothing here runs or downloads until the "Photoreal" button is pressed for the first time.
-  // It has its own renderer, scene and camera, so plan mode stays as light as before.
-  //  - Physically based materials, filmic tone mapping, sRGB output.
-  //  - Daylight: a real HDR sky lights the scene and is visible through the windows;
-  //    a sun light throws shadows through the window openings. A ceiling closes the rooms.
-  //  - Photo textures for the floors (wood planks, tiles) and a real 3D model for the woman.
-  //  - Every download has a built-in stand-in, so the view also works offline.
-  //  - Furniture is copied from plan mode each time the view opens, in its current position.
-  var P = null;
-  var photoLayer = document.getElementById('photo');
-  var PH = 'https://dl.polyhaven.org/file/ph-assets/';
-  var PHOTO = {
-    gltfLoader: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
-    rgbeLoader: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js',
-    sky: PH + 'HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr',
-    woman: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/models/gltf/Xbot.glb',
-    woodSize: 220, tileSize: 240,   // cm covered by one repeat of the texture
-    env: 0.6, envFloor: 0.3         // how strongly the sky lights walls and furniture / the floors
-  };
-  function loadScript(url, done) {
-    var el = document.createElement('script');
-    el.src = url;
-    el.onload = function () { done(true); };
-    el.onerror = function () { done(false); };
-    document.head.appendChild(el);
-  }
-  // Stand-in textures drawn on a canvas, used until (or instead of) the photo textures.
+  // ---------- Textures drawn in code (floors) ----------
   function canvasTexture(size, draw, srgb) {
     var cv = document.createElement('canvas');
     cv.width = cv.height = size;
@@ -1394,206 +1345,6 @@ body.walk .hint { display: block; }
     }
   }
 
-  function initPhoto() {
-    P = { total: 0, done: 0, mixer: null, womanModel: null, womanScale: 1, pbr: {}, paint: {} };
-    var r = P.renderer = new THREE.WebGLRenderer({ antialias: true });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    r.outputEncoding = THREE.sRGBEncoding;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.0;
-    r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
-    r.shadowMap.autoUpdate = false;        // the scene is static: shadows are drawn only when something changes
-    photoLayer.appendChild(r.domElement);
-
-    P.scene = new THREE.Scene();
-    P.scene.background = new THREE.Color(0xcfdcea);
-    P.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 500);
-    P.camera.rotation.order = 'YXZ';
-    P.root = new THREE.Group();
-    P.root.scale.copy(root.scale);
-    P.root.position.copy(root.position);
-    P.scene.add(P.root);
-
-    // Light. Until the HDR sky has loaded, a soft sky light stands in for it.
-    P.hemi = new THREE.HemisphereLight(0xfff3e4, 0xd9c8b2, 0.8);    // warm fill, stands for light bouncing off walls and floor
-    P.scene.add(P.hemi);
-    var sun = P.sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
-    sun.position.set(2.5, 6, 8);           // low sun from the Zimmer window side
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(4096, 4096);
-    sun.shadow.camera.left = -9; sun.shadow.camera.right = 9;
-    sun.shadow.camera.top = 9; sun.shadow.camera.bottom = -9;
-    sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 30;
-    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
-    P.scene.add(sun);
-
-    // Materials
-    function std(o) { o.envMapIntensity = o.envMapIntensity || PHOTO.env; return new THREE.MeshStandardMaterial(o); }
-    var M = P.mat = {
-      wood: std({ map: woodMat.map, bumpMap: woodMat.bumpMap, bumpScale: 0.003, roughness: 0.6, envMapIntensity: PHOTO.envFloor }),
-      tile: std({
-        map: canvasTexture(2048, function (g, n) { drawTiles(g, n, false); }, true),
-        bumpMap: canvasTexture(1024, function (g, n) { drawTiles(g, n, true); }, false), bumpScale: 0.004,
-        roughness: 0.62, envMapIntensity: 0.25
-      }),
-      wall: std({ color: lin(LOOK.wall), roughness: 0.92 }),
-      ceiling: std({ color: 0xffffff, roughness: 0.96 }),
-      frame: std({ color: lin(LOOK.frame), roughness: 0.4 }),
-      brass: std({ color: lin(LOOK.brass), metalness: 1, roughness: 0.32, envMapIntensity: 1 }),
-      chrome: std({ color: 0xd9dde0, metalness: 1, roughness: 0.14, envMapIntensity: 1 }),
-      ceramic: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 0.8 }),
-      glass: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.02, transparent: true, opacity: 0.12, depthWrite: false, envMapIntensity: 1.2 })
-    };
-
-    // Floors. Texture coordinates follow real positions, so planks and tiles run on
-    // from room to room at their true size.
-    function floor(x0, z0, x1, z1, mat, period) {
-      var geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
-      var pos = geo.attributes.position, uv = geo.attributes.uv, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-      for (var i = 0; i < pos.count; i++) {
-        var wx = (cx + pos.getX(i)) / period, wz = (cz - pos.getY(i)) / period;
-        if (mat === M.wood) uv.setXY(i, wz, wx); else uv.setXY(i, wx, wz);     // planks run along z
-      }
-      var m = new THREE.Mesh(geo, mat);
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(cx, 0, cz);
-      m.receiveShadow = true;
-      P.root.add(m);
-    }
-    var tiled = { 'Bad': 1, 'Wohnküche': 1 };
-    rooms.forEach(function (rm) {
-      if (tiled[rm.name]) floor(rm.x0, rm.z0, rm.x1, rm.z1, M.tile, PHOTO.tileSize);
-      else floor(rm.x0, rm.z0, rm.x1, rm.z1, M.wood, PHOTO.woodSize);
-    });
-    floor(135, -487, 282, -459, M.tile, PHOTO.tileSize);     // window recess, Bad
-    floor(291, -487, 553, -459, M.tile, PHOTO.tileSize);     // window recess, Wohnküche
-
-    // Ceiling: faces down, lets no sun in from above.
-    var ceil = new THREE.Mesh(new THREE.PlaneGeometry(678, 1197), M.ceiling);
-    ceil.rotation.x = Math.PI / 2;
-    ceil.position.set(309, H, -159.5);
-    ceil.castShadow = true;
-    P.root.add(ceil);
-
-    // Walls and windows from the same wall list as plan mode. Door thresholds are brass strips.
-    P.walls = new THREE.Group(); P.windows = new THREE.Group();
-    buildWalls(P.walls, P.windows, { side: M.wall, top: M.wall, glass: M.glass, frame: M.frame, sill: M.brass });
-    box(P.walls, 116, 0.6, -135, 122, DOOR_H, -45, M.frame);            // closed entrance door
-    P.root.add(P.walls, P.windows);
-
-    P.dyn = new THREE.Group();             // furniture, refreshed each time the view opens
-    P.root.add(P.dyn);
-
-    // ---- Downloads. Each one swaps in when it arrives; a failure keeps the stand-in.
-    var loader = new THREE.TextureLoader(), aniso = r.capabilities.getMaxAnisotropy();
-    M.tile.map.anisotropy = aniso;
-    function begin() { P.total++; showPhotoProgress(); }
-    function finish() { P.done++; r.shadowMap.needsUpdate = true; showPhotoProgress(); }
-    function texture(name, kind, srgb, apply) {
-      begin();
-      loader.load(PH + 'Textures/jpg/1k/' + name + '/' + name + '_' + kind + '_1k.jpg', function (t) {
-        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        if (srgb) t.encoding = THREE.sRGBEncoding;
-        t.anisotropy = aniso;
-        apply(t);
-        finish();
-      }, undefined, finish);
-    }
-    function textureSet(name, mat, tint) {
-      texture(name, 'diff', true, function (t) { mat.map = t; if (tint) mat.color.set(tint); mat.needsUpdate = true; });
-      texture(name, 'nor_gl', false, function (t) { mat.normalMap = t; mat.needsUpdate = true; });
-      texture(name, 'rough', false, function (t) { mat.roughnessMap = t; mat.roughness = 1; mat.needsUpdate = true; });
-    }
-    // Floors stay drawn (planks and tiles as in the walkthrough video): no download.
-
-    begin();
-    loadScript(PHOTO.rgbeLoader, function (ok) {
-      if (!ok || !THREE.RGBELoader) { finish(); return; }
-      new THREE.RGBELoader().load(PHOTO.sky, function (t) {
-        var pm = new THREE.PMREMGenerator(r);
-        P.scene.environment = pm.fromEquirectangular(t).texture;
-        pm.dispose();
-        t.mapping = THREE.EquirectangularReflectionMapping;
-        P.scene.background = t;
-        P.hemi.intensity = 0.35;
-        finish();
-      }, undefined, finish);
-    });
-
-    begin();
-    loadScript(PHOTO.gltfLoader, function (ok) {
-      if (!ok || !THREE.GLTFLoader) { finish(); return; }
-      new THREE.GLTFLoader().load(PHOTO.woman, function (g) {
-        var model = g.scene;
-        P.womanScale = 94.4;     // the model is about 1.8 m tall in metres: scaled to 170 cm in the cm-based scene
-        model.traverse(function (o) {
-          if (!o.isMesh) return;
-          o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
-          if (!o.material) return;
-          // Grey figure: light grey body, dark grey joints.
-          o.material.color.set(/joint/i.test(o.material.name + o.name) ? 0x3b3e43 : 0x9a9ea3);
-          o.material.roughness = 0.55; o.material.metalness = 0;
-          o.material.envMapIntensity = PHOTO.env;
-        });
-        // A standing pose instead of the stiff arms-out rest pose.
-        var idle = null;
-        (g.animations || []).forEach(function (a) { if (a.name === 'idle') idle = a; });
-        if (idle) { P.mixer = new THREE.AnimationMixer(model); P.mixer.clipAction(idle).play(); }
-        P.womanModel = model;
-        syncPhoto();
-        finish();
-      }, undefined, finish);
-    });
-  }
-  function showPhotoProgress() {
-    if (!photoOn) return;
-    hintEl.textContent = 'Walkaround: ' + (P.done < P.total
-      ? 'loading textures, sky and models (' + P.done + ' of ' + P.total + ') … you can already look around. '
-      : '') + WALK_HINT;
-  }
-  // Plan-mode material -> photoreal material, made once per plan material.
-  function pbrFor(m) {
-    if (P.pbr[m.uuid]) return P.pbr[m.uuid];
-    var out;
-    if (m === white || m === basinMat) out = P.mat.ceramic;
-    else if (m.metalness > 0.5) out = P.mat.chrome;
-    else { out = m.clone(); out.envMapIntensity = PHOTO.env; }    // plan materials are already physically based
-    return (P.pbr[m.uuid] = out);
-  }
-  // Copies the furniture from plan mode, where it stands right now.
-  function syncPhoto() {
-    while (P.dyn.children.length) P.dyn.remove(P.dyn.children[0]);
-    items.forEach(function (it) {
-      if (it === woman && P.womanModel) {
-        P.womanModel.position.set(it.position.x, 0, it.position.z);
-        P.womanModel.rotation.y = it.rotation.y + womanFace;
-        P.womanModel.scale.set(P.womanScale, P.womanScale, P.womanScale);
-        P.dyn.add(P.womanModel);
-        return;
-      }
-      var copy = it.clone(true);
-      copy.visible = true;
-      copy.traverse(function (o) {
-        if (o.isLine || (o.isMesh && o.material.isMeshBasicMaterial)) { o.visible = false; return; }   // measure lines
-        if (o.isMesh) { o.material = pbrFor(o.material); o.castShadow = true; o.receiveShadow = true; }
-      });
-      P.dyn.add(copy);
-    });
-    // Painted walls carry over from plan mode.
-    applyPaints(P.walls, function (hex) {
-      return P.paint[hex] || (P.paint[hex] = new THREE.MeshStandardMaterial({ color: lin(hex), roughness: 0.92, envMapIntensity: PHOTO.env }));
-    });
-    P.renderer.shadowMap.needsUpdate = true;
-  }
-  function enterPhoto() {
-    if (!P) initPhoto();
-    syncPhoto();
-    photoLayer.hidden = false;
-    showPhotoProgress();
-  }
-  function leavePhoto() { photoLayer.hidden = true; }
-
   var vw = 0, vh = 0;
   function resize() {
     vw = stage.clientWidth; vh = stage.clientHeight;
@@ -1601,11 +1352,6 @@ body.walk .hint { display: block; }
     camera.aspect = vw / Math.max(vh, 1);
     camera.fov = walking ? 75 : (camera.aspect < 1 ? 60 : 45);
     camera.updateProjectionMatrix();
-    if (P) {
-      P.renderer.setSize(vw, vh, false);
-      P.camera.aspect = camera.aspect;
-      P.camera.updateProjectionMatrix();
-    }
   }
   window.addEventListener('resize', resize);
   resize();
@@ -1624,13 +1370,6 @@ body.walk .hint { display: block; }
     var now = performance.now(), dtS = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
     if (walking) stepWalk(dtS); else placeCamera();
-    if (photoOn) {
-      // Only the photoreal scene is drawn; the plan scene rests.
-      if (P.mixer) P.mixer.update(dtS);
-      P.renderer.render(P.scene, P.camera);
-      requestAnimationFrame(frame);
-      return;
-    }
     if (selBox) selBox.update();
     renderer.render(scene, camera);
     // While the round arrow is being dragged it stays where it was grabbed.
